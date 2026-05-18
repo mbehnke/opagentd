@@ -43,7 +43,7 @@ make build
 sudo make install
 
 # Verify
-opagentctl status
+opagentctl --help
 
 # Start daemon
 sudo systemctl start opagentd

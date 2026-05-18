@@ -8,7 +8,7 @@ CONFDIR ?= /etc/opagentd
 build:
 	cargo build --release
 
-install: build
+install:
 	install -Dm755 target/release/opagentd $(DESTDIR)$(BINDIR)/opagentd
 	install -Dm755 target/release/opagentctl $(DESTDIR)$(BINDIR)/opagentctl
 	install -Dm644 systemd/opagentd.service $(DESTDIR)$(SYSDDIR)/opagentd.service
