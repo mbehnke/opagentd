@@ -12,7 +12,7 @@ use opagent_core::agents::git::GitAgent;
 use opagent_core::agents::shell::ShellAgent;
 use opagent_core::agents::{AgentExecutor, AgentResult};
 use opagent_core::config::{Config, SecurityLevel};
-use opagent_core::message::{Command, PendingTask, Request, Response, ResponseData};
+use opagent_core::message::{Command, ExecStep, PendingTask, Request, Response, ResponseData};
 use opagent_core::security::Operation;
 
 type AgentBox = Arc<dyn AgentExecutor>;
@@ -53,6 +53,7 @@ impl Daemon {
             Command::Pending => self.handle_pending(id).await,
             Command::Logs { count } => self.handle_logs(id, count),
             Command::Validate { operation } => self.handle_validate(id, operation),
+            Command::Exec { prompt } => self.handle_exec(id, prompt).await,
         }
     }
 
@@ -227,6 +228,127 @@ impl Daemon {
         }
     }
 
+    async fn handle_exec(&self, id: String, prompt: String) -> Response {
+        if !self.config.llm.enabled {
+            return Response {
+                id,
+                status: "error".into(),
+                data: None,
+                message: Some("LLM is disabled in config (llm.enabled = false)".into()),
+            };
+        }
+
+        let api_key = match self.config.llm.resolve_api_key() {
+            Some(k) => k,
+            None => {
+                return Response {
+                    id,
+                    status: "error".into(),
+                    data: None,
+                    message: Some("No API key configured. Set api_key in [llm] or DEEPSEEK_API_KEY env var.".into()),
+                };
+            }
+        };
+
+        info!(prompt = %prompt, "LLM exec");
+
+        let llm_response = match call_llm(&self.config.llm.model,
+                                            &self.config.llm.base_url_or_default(),
+                                            &api_key,
+                                            &prompt).await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("LLM call failed: {}", e);
+                return Response {
+                    id,
+                    status: "error".into(),
+                    data: None,
+                    message: Some(format!("LLM call failed: {}", e)),
+                };
+            }
+        };
+
+        let ops: Vec<Operation> = match parse_operations(&llm_response) {
+            Ok(ops) => ops,
+            Err(e) => {
+                return Response {
+                    id,
+                    status: "error".into(),
+                    data: None,
+                    message: Some(format!("Failed to parse LLM response: {} — raw: {}", e, llm_response)),
+                };
+            }
+        };
+
+        let mut results: Vec<ExecStep> = Vec::new();
+        for op in &ops {
+            let desc = op.describe();
+            let level = op.security_level(&self.config);
+            info!(operation = %desc, level = ?level, "LLM planned");
+
+            match level {
+                SecurityLevel::Deny => {
+                    results.push(ExecStep {
+                        operation: desc,
+                        level: "deny".into(),
+                        success: false,
+                        output: "Blocked by security policy".into(),
+                    });
+                }
+                SecurityLevel::Auto => {
+                    let step_result = match self.execute_operation(op) {
+                        Ok(r) => ExecStep {
+                            operation: desc,
+                            level: "auto".into(),
+                            success: r.success,
+                            output: r.output,
+                        },
+                        Err(e) => ExecStep {
+                            operation: desc,
+                            level: "auto".into(),
+                            success: false,
+                            output: e,
+                        },
+                    };
+                    results.push(step_result);
+                }
+                SecurityLevel::Confirm => {
+                    let task_id = gen_task_id();
+                    self.pending.lock().await.push(PendingTask {
+                        task_id,
+                        operation: op.clone(),
+                        level,
+                        created_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                    });
+                    results.push(ExecStep {
+                        operation: desc,
+                        level: "confirm".into(),
+                        success: false,
+                        output: "Queued for approval".into(),
+                    });
+                }
+            }
+        }
+
+        Response {
+            id,
+            status: "ok".into(),
+            data: Some(ResponseData::Exec {
+                reasoning: if ops.is_empty() {
+                    "No operations generated".into()
+                } else {
+                    format!("{} operation(s) planned by LLM", ops.len())
+                },
+                results,
+            }),
+            message: None,
+        }
+    }
+
     fn execute_operation(&self, op: &Operation) -> Result<AgentResult, String> {
         let agent = self
             .find_agent(op)
@@ -243,6 +365,96 @@ fn gen_task_id() -> String {
         .as_nanos();
     format!("task_{:016x}", ts)
 }
+
+// --- LLM Integration ---
+
+const SYSTEM_PROMPT: &str = r#"You are a Linux system agent. Given a user's request in natural language, respond with a JSON array of operations to execute.
+
+Available operations:
+- {"Shell": {"command": "...", "args": [...]}} — run a shell command
+- {"FileRead": {"path": "..."}} — read a file
+- {"FileWrite": {"path": "...", "content": "..."}} — write a file
+- {"FileDelete": {"path": "..."}} — delete a file
+- {"Git": {"command": "...", "repo_path": "..."}} — run a git command
+
+Rules:
+1. Output ONLY the JSON array of operations, nothing else.
+2. Break complex tasks into minimal, focused steps.
+3. Use absolute paths when possible.
+4. For file reads, you may use read-only safety: prefer less dangerous paths.
+5. Never include rm -rf /, dd, mkfs, or > /dev/sda.
+6. If the task cannot be done as operations, respond with an empty array [] and a short explanation in a comment.
+"#;
+
+async fn call_llm(model: &str, base_url: &str, api_key: &str, prompt: &str) -> Result<String, String> {
+    let client = reqwest::Client::new();
+
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 2048,
+    });
+
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP error: {}", e))?;
+
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {}", e))?;
+
+    if !status.is_success() {
+        return Err(format!("API {} {}: {}", status.as_u16(), status.canonical_reason().unwrap_or(""), text));
+    }
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("JSON parse: {}", e))?;
+
+    let content = parsed["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| format!("Unexpected API response structure: {}", text))?;
+
+    Ok(content.to_string())
+}
+
+fn parse_operations(content: &str) -> Result<Vec<Operation>, String> {
+    let extracted = extract_json_array(content)?;
+    let ops: Vec<Operation> =
+        serde_json::from_str(&extracted).map_err(|e| format!("Parse: {}", e))?;
+    Ok(ops)
+}
+
+fn extract_json_array(text: &str) -> Result<String, String> {
+    // The LLM might wrap JSON in markdown code blocks. Extract just the JSON array.
+    let trimmed = text.trim();
+
+    // Strip markdown code fences if present
+    let stripped = if let Some(inner) = trimmed.strip_prefix("```json") {
+        inner.strip_suffix("```").unwrap_or(inner).trim()
+    } else if let Some(inner) = trimmed.strip_prefix("```") {
+        inner.strip_suffix("```").unwrap_or(inner).trim()
+    } else {
+        trimmed
+    };
+
+    // Find the JSON array
+    let start = stripped.find('[').ok_or_else(|| format!("No JSON array found in: {}", text))?;
+    let end = stripped.rfind(']').ok_or_else(|| format!("Unclosed JSON array in: {}", text))?;
+
+    Ok(stripped[start..=end].to_string())
+}
+
+// --- Connection handling ---
 
 async fn handle_connection(stream: UnixStream, daemon: Arc<Daemon>) {
     let (reader, mut writer) = stream.into_split();

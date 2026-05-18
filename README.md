@@ -182,6 +182,40 @@ opagentctl submit '{"Shell":{"command":"bash","args":["-c","echo hello && ls /tm
 opagentctl submit '{"Git":{"command":"commit --allow-empty -m \"agent commit\"","repo_path":"/home/user/project"}}'
 ```
 
+### LLM-powered execution (`opagentctl exec`)
+
+Instead of crafting JSON operations manually, describe tasks in natural language.  
+The LLM (DeepSeek, OpenAI, Ollama) translates your intent into validated operations.
+
+```bash
+# Simple commands
+opagentctl exec "print the current date and time"
+# → {"exec":{"reasoning":"1 operation(s) planned by LLM",...}}
+
+# System queries
+opagentctl exec "show disk usage in human readable format"
+# → planned: "df -h" → executed
+
+# Multi-step tasks (LLM plans, security validates each step)
+opagentctl exec "who is currently logged in and what processes are they running"
+# → planned: who, ps → 2 operations, auto-executed
+
+# File operations
+opagentctl exec "create a file /tmp/report.txt with system uptime info"
+# → planned: 4 operations (hostname, uname, uptime, FileWrite) → executed
+
+# Security example — the LLM plan passes through validation:
+opagentctl exec "read the shadow password file"
+# → LLM plans: FileRead /etc/shadow → deny (not in allowed_paths)
+
+# Production example
+opagentctl exec "restart nginx and check if it's healthy"
+```
+
+> **Security note:** Every LLM-generated operation passes through the same  
+> validate → auto/confirm/deny pipeline as manual JSON operations.  
+> Dangerous commands are blocked regardless of what the LLM generates.
+
 ### Monitor and debug
 
 ```bash

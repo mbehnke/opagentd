@@ -47,6 +47,11 @@ enum Commands {
         /// JSON operation specification
         operation: String,
     },
+    /// Execute a task described in natural language (LLM-powered)
+    Exec {
+        /// Natural language description of the task
+        prompt: Vec<String>,
+    },
 }
 
 async fn send_request(socket: &PathBuf, request: &Request) -> Result<Response> {
@@ -99,6 +104,9 @@ async fn main() -> Result<()> {
                 .context("Failed to parse operation JSON")?;
             Command::Validate { operation: op }
         }
+        Commands::Exec { prompt } => Command::Exec {
+            prompt: prompt.join(" "),
+        },
     };
 
     let request = Request {

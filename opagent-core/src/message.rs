@@ -30,6 +30,9 @@ pub enum Command {
     Validate {
         operation: Operation,
     },
+    Exec {
+        prompt: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -83,6 +86,19 @@ pub enum ResponseData {
         success: bool,
         output: String,
     },
+    #[serde(rename = "exec")]
+    Exec {
+        reasoning: String,
+        results: Vec<ExecStep>,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExecStep {
+    pub operation: String,
+    pub level: String,
+    pub success: bool,
+    pub output: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
