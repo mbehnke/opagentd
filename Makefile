@@ -12,6 +12,13 @@ install:
 	install -Dm755 target/release/opagentd $(DESTDIR)$(BINDIR)/opagentd
 	install -Dm755 target/release/opagentctl $(DESTDIR)$(BINDIR)/opagentctl
 	install -Dm644 systemd/opagentd.service $(DESTDIR)$(SYSDDIR)/opagentd.service
+	@if [ -f $(DESTDIR)$(CONFDIR)/config.toml ]; then \
+		echo "Config exists, skipping (use 'make install-config' to overwrite)"; \
+	else \
+		install -Dm644 config/opagentd.toml $(DESTDIR)$(CONFDIR)/config.toml; \
+	fi
+
+install-config:
 	install -Dm644 config/opagentd.toml $(DESTDIR)$(CONFDIR)/config.toml
 
 uninstall:
