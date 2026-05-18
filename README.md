@@ -102,6 +102,13 @@ audit_log = "/var/log/opagentd/audit.jsonl"
 shell_enabled = true
 file_enabled = true
 git_enabled = true
+
+[llm]
+provider = "deepseek"
+model = "deepseek-chat"
+# api_key = "sk-..."          # or env var: DEEPSEEK_API_KEY
+temperature = 0.7
+enabled = true
 ```
 
 ## File System Layout

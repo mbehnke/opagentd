@@ -108,6 +108,15 @@ audit_log = "/var/log/opagentd/audit.jsonl"
 shell_enabled = true
 file_enabled = true
 git_enabled = true
+
+[llm]
+provider = "deepseek"
+model = "deepseek-chat"
+# base_url = "https://api.deepseek.com"   # optional override
+# api_key = "sk-..."                       # or env: DEEPSEEK_API_KEY
+temperature = 0.7
+# max_tokens = 4096
+enabled = true
 ```
 
 ### File System Paths

@@ -145,3 +145,73 @@ fn test_serialize_operation() {
         _ => panic!("Wrong variant"),
     }
 }
+
+#[test]
+fn test_llm_config_defaults() {
+    let llm = opagent_core::config::LlmConfig::default();
+    assert_eq!(llm.provider, opagent_core::config::LlmProvider::Deepseek);
+    assert_eq!(llm.model, "deepseek-chat");
+    assert!(llm.enabled);
+    assert_eq!(llm.temperature, 0.7);
+    assert!(llm.api_key.is_none());
+    assert!(llm.max_tokens.is_none());
+}
+
+#[test]
+fn test_llm_provider_base_urls() {
+    use opagent_core::config::LlmProvider;
+    assert!(LlmProvider::Deepseek.default_base_url().contains("deepseek"));
+    assert!(LlmProvider::OpenAI.default_base_url().contains("openai"));
+    assert!(LlmProvider::Ollama.default_base_url().contains("localhost"));
+    assert!(LlmProvider::Custom.default_base_url().is_empty());
+}
+
+#[test]
+fn test_llm_config_base_url_or_default() {
+    let mut llm = opagent_core::config::LlmConfig::default();
+    assert_eq!(llm.base_url_or_default(), "https://api.deepseek.com");
+
+    llm.base_url = Some("https://custom.api.example.com".into());
+    assert_eq!(llm.base_url_or_default(), "https://custom.api.example.com");
+}
+
+#[test]
+fn test_llm_config_debug_masks_api_key() {
+    let mut llm = opagent_core::config::LlmConfig::default();
+    llm.api_key = Some("sk-secret-key".into());
+    let debug_str = format!("{:?}", llm);
+    assert!(!debug_str.contains("sk-secret-key"));
+    assert!(debug_str.contains("***"));
+}
+
+#[test]
+fn test_llm_serialize_skips_api_key() {
+    let mut llm = opagent_core::config::LlmConfig::default();
+    llm.api_key = Some("sk-secret-key".into());
+    let json = serde_json::to_string(&llm).unwrap();
+    assert!(!json.contains("sk-secret-key"));
+    assert!(!json.contains("api_key"));
+}
+
+#[test]
+fn test_llm_deserialize_from_toml() {
+    let toml_str = r#"
+[llm]
+provider = "openai"
+model = "gpt-4o"
+api_key = "sk-test123"
+temperature = 0.3
+max_tokens = 2048
+enabled = true
+"#;
+    #[derive(serde::Deserialize)]
+    struct Wrapper {
+        llm: opagent_core::config::LlmConfig,
+    }
+    let wrapper: Wrapper = toml::from_str(toml_str).unwrap();
+    assert_eq!(wrapper.llm.provider, opagent_core::config::LlmProvider::OpenAI);
+    assert_eq!(wrapper.llm.model, "gpt-4o");
+    assert_eq!(wrapper.llm.api_key.as_deref(), Some("sk-test123"));
+    assert_eq!(wrapper.llm.temperature, 0.3);
+    assert_eq!(wrapper.llm.max_tokens, Some(2048));
+}
