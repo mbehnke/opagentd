@@ -1,0 +1,17 @@
+[security]
+default_level = "confirm"
+allowed_paths = ["/home", "/tmp", "/var/tmp"]
+denied_commands = ["rm -rf /", "dd", "> /dev/sda", "mkfs"]
+
+[socket]
+path = "/run/opagentd/opagentd.sock"
+permissions = 432
+
+[logging]
+level = "info"
+audit_log = "/var/log/opagentd/audit.jsonl"
+
+[agent]
+shell_enabled = true
+file_enabled = true
+git_enabled = true

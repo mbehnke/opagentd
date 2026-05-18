@@ -1,0 +1,20 @@
+[package]
+name = "opagent-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Optional REST API bridge for opagentd"
+
+[[bin]]
+name = "opagent-api"
+path = "src/main.rs"
+
+[dependencies]
+opagent-core = { path = "../opagent-core" }
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+serde = { version = "1", features = ["derive"] }
