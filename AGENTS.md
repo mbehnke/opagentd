@@ -35,8 +35,10 @@ opagentd/                  # Workspace root
 │   └── src/main.rs
 ├── systemd/
 │   └── opagentd.service   # systemd unit file
-└── config/
-    └── opagentd.toml      # Default configuration
+├── config/
+│   └── opagentd.toml      # Default configuration
+└── tests/
+    └── integration.rs     # Integration tests
 ```
 
 ## Agent Types
