@@ -4,9 +4,8 @@ Documentation=https://github.com/anomalyco/opagentd
 After=network.target
 
 [Service]
-Type=notify
+Type=simple
 ExecStart=/usr/local/bin/opagentd
-ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s
 User=root
